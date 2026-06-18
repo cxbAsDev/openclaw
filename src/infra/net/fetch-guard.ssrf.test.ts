@@ -2111,6 +2111,98 @@ describe("fetchWithSsrFGuard hardening", () => {
     expect(lookupFn).toHaveBeenCalledOnce();
     await result.release();
   });
+
+  it("allows NO_PROXY-matched private IP direct access in trusted env-proxy mode", async () => {
+    clearProxyEnv();
+    // clearProxyEnv sets lowercase http_proxy="" which shadows uppercase.
+    // Undici semantics: empty lowercase shadows uppercase, so stub
+    // lowercase with the real proxy value instead.
+    vi.stubEnv("http_proxy", "http://proxy.corp:8080");
+    vi.stubEnv("no_proxy", "");
+    vi.stubEnv("NO_PROXY", "");
+    vi.stubEnv("NO_PROXY", "192.168.*");
+    (globalThis as Record<string, unknown>)[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
+      Agent: agentCtor,
+      EnvHttpProxyAgent: envHttpProxyAgentCtor,
+      ProxyAgent: proxyAgentCtor,
+      fetch: vi.fn(async () => okResponse()),
+    };
+    const lookupFn = vi.fn(async () => [
+      { address: "192.168.1.100", family: 4 },
+    ]) as unknown as LookupFn;
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const requestInit = init as RequestInit & { dispatcher?: unknown };
+      expectDispatcherAttached(requestInit.dispatcher);
+      expect(getDispatcherClassName(requestInit.dispatcher)).not.toBe("EnvHttpProxyAgent");
+      return okResponse();
+    });
+
+    const result = await fetchWithSsrFGuard({
+      url: "http://192.168.1.100:8123/status",
+      fetchImpl,
+      lookupFn,
+      mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(lookupFn).toHaveBeenCalledOnce();
+    await result.release();
+  });
+
+  it("blocks non-NO_PROXY private IP even in trusted env-proxy mode", async () => {
+    clearProxyEnv();
+    vi.stubEnv("http_proxy", "http://proxy.corp:8080");
+    vi.stubEnv("no_proxy", "");
+    vi.stubEnv("NO_PROXY", "");
+    vi.stubEnv("NO_PROXY", "other.host");
+    const lookupFn = vi.fn(async () => [
+      { address: "192.168.1.100", family: 4 },
+    ]) as unknown as LookupFn;
+    const fetchImpl = vi.fn(async () => okResponse());
+
+    await expect(
+      fetchWithSsrFGuard({
+        url: "http://192.168.1.100:8123/status",
+        fetchImpl,
+        lookupFn,
+        mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+      }),
+    ).rejects.toThrow("Blocked");
+  });
+
+  it("allows NO_PROXY-matched localhost direct access in trusted env-proxy mode", async () => {
+    clearProxyEnv();
+    vi.stubEnv("http_proxy", "http://proxy.corp:8080");
+    vi.stubEnv("no_proxy", "");
+    vi.stubEnv("NO_PROXY", "");
+    vi.stubEnv("NO_PROXY", "localhost,127.0.0.1");
+    (globalThis as Record<string, unknown>)[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
+      Agent: agentCtor,
+      EnvHttpProxyAgent: envHttpProxyAgentCtor,
+      ProxyAgent: proxyAgentCtor,
+      fetch: vi.fn(async () => okResponse()),
+    };
+    const lookupFn = vi.fn(async () => [
+      { address: "127.0.0.1", family: 4 },
+    ]) as unknown as LookupFn;
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const requestInit = init as RequestInit & { dispatcher?: unknown };
+      expectDispatcherAttached(requestInit.dispatcher);
+      expect(getDispatcherClassName(requestInit.dispatcher)).not.toBe("EnvHttpProxyAgent");
+      return okResponse();
+    });
+
+    const result = await fetchWithSsrFGuard({
+      url: "http://localhost:8080/api",
+      fetchImpl,
+      lookupFn,
+      mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(lookupFn).toHaveBeenCalledOnce();
+    await result.release();
+  });
 });
 
 function toLintErrorObject(value: unknown, fallbackMessage: string): Error {

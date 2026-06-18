@@ -11,7 +11,12 @@ import {
   shouldUseConfiguredLocalOriginManagedProxyBypass,
   type ConfiguredLocalOriginManagedProxyBypass,
 } from "./configured-local-origin-bypass.js";
-import { hasProxyEnvConfigured, shouldUseEnvHttpProxyForUrl } from "./proxy-env.js";
+import {
+  hasEnvHttpProxyConfigured,
+  hasProxyEnvConfigured,
+  matchesNoProxy,
+  shouldUseEnvHttpProxyForUrl,
+} from "./proxy-env.js";
 import { retainSafeHeadersForCrossOriginRedirect as retainSafeRedirectHeaders } from "./redirect-headers.js";
 import {
   fetchWithRuntimeDispatcher,
@@ -509,6 +514,34 @@ async function fetchWithSsrFGuardInternal(
           (params.useEnvProxyForEligibleUrls === true && !canUseManagedProxy)) &&
         !dispatcherPolicy &&
         shouldUseEnvHttpProxyForUrl(parsedUrl.toString());
+
+      // When trusted-env-proxy mode is active but NO_PROXY excludes this URL,
+      // the request bypasses the proxy and goes direct through pinned DNS.
+      //
+      // Relax SSRF private-network checks for NO_PROXY-matched hosts because:
+      // 1. useTrustedEnvProxy is an explicit operator opt-in — the user already
+      //    trusted the proxy with ALL traffic, including private-network targets.
+      // 2. NO_PROXY is an explicit per-host exclusion — the operator chose to
+      //    bypass the proxy for these specific addresses. Direct access does not
+      //    add risk the proxy would not have already accepted.
+      // 3. SSRF hostname allowlist and DNS pinning still apply; only the
+      //    private-network address block is relaxed, and only for the matched host.
+      const resolvedProtocol = parsedUrl.protocol === "https:" ? "https" : "http";
+      const trustedNoProxyBypass =
+        mode === GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY &&
+        !canUseTrustedEnvProxy &&
+        hasEnvHttpProxyConfigured(resolvedProtocol) &&
+        matchesNoProxy(parsedUrl.toString());
+      const effectivePolicy = trustedNoProxyBypass
+        ? {
+            ...policyForUrl,
+            allowPrivateNetwork: true,
+            allowedHostnames: [
+              ...(policyForUrl?.allowedHostnames ?? []),
+              parsedUrl.hostname,
+            ],
+          }
+        : policyForUrl;
       const canUseMockedFetchWithoutDns =
         isUsingMockedFetch &&
         params.lookupFn === undefined &&
@@ -521,7 +554,7 @@ async function fetchWithSsrFGuardInternal(
       // Trusted env-proxy and pinDns=false can skip local DNS pinning, so keep
       // the pre-DNS hostname/IP policy checks from the pinned path.
       if (canUseTrustedEnvProxy || params.pinDns === false) {
-        assertHostnameAllowedWithPolicy(parsedUrl.hostname, policyForUrl);
+        assertHostnameAllowedWithPolicy(parsedUrl.hostname, effectivePolicy);
       }
 
       if (canUseTrustedEnvProxy) {
@@ -529,36 +562,38 @@ async function fetchWithSsrFGuardInternal(
       } else if (canUseManagedProxy) {
         const pinned = await resolvePinnedHostnameWithPolicy(parsedUrl.hostname, {
           lookupFn: params.lookupFn,
-          policy: policyForUrl,
+          policy: effectivePolicy,
         });
         dispatcher = shouldUseConfiguredLocalOriginManagedProxyBypass({
           url: parsedUrl,
           managedProxyBypass: params.managedProxyBypass,
           resolvedAddresses: pinned.addresses,
         })
-          ? createPinnedDispatcher(pinned, dispatcherPolicy, policyForUrl, timeoutMs)
+          ? createPinnedDispatcher(pinned, dispatcherPolicy, effectivePolicy, timeoutMs)
           : createHttp1EnvHttpProxyAgent(undefined, timeoutMs);
       } else if (usesTrustedExplicitProxyMode) {
         // Explicit proxy targets are still checked against the caller's hostname
         // policy, but the proxy does the DNS resolution for the final target.
-        assertHostnameAllowedWithPolicy(parsedUrl.hostname, policyForUrl);
+        assertHostnameAllowedWithPolicy(parsedUrl.hostname, effectivePolicy);
         dispatcher = createPolicyDispatcherWithoutPinnedDns(dispatcherPolicy, timeoutMs);
       } else if (canUseMockedFetchWithoutDns) {
         // Test-installed fetch mocks should stay hermetic. Host/IP policy still runs;
         // real fetches continue through pinned DNS below.
-        assertHostnameAllowedWithPolicy(parsedUrl.hostname, policyForUrl);
+        assertHostnameAllowedWithPolicy(parsedUrl.hostname, effectivePolicy);
       } else if (params.pinDns === false) {
         await resolvePinnedHostnameWithPolicy(parsedUrl.hostname, {
           lookupFn: params.lookupFn,
-          policy: policyForUrl,
+          policy: effectivePolicy,
         });
-        dispatcher = createPolicyDispatcherWithoutPinnedDns(dispatcherPolicy, timeoutMs);
+        dispatcher = trustedNoProxyBypass
+          ? createHttp1Agent(undefined, timeoutMs)
+          : createPolicyDispatcherWithoutPinnedDns(dispatcherPolicy, timeoutMs);
       } else {
         const pinned = await resolvePinnedHostnameWithPolicy(parsedUrl.hostname, {
           lookupFn: params.lookupFn,
-          policy: policyForUrl,
+          policy: effectivePolicy,
         });
-        dispatcher = createPinnedDispatcher(pinned, dispatcherPolicy, policyForUrl, timeoutMs);
+        dispatcher = createPinnedDispatcher(pinned, dispatcherPolicy, effectivePolicy, timeoutMs);
       }
 
       const init: DispatcherAwareRequestInit = {
