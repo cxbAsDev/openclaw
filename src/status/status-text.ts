@@ -32,13 +32,13 @@ import { toAgentModelListLike } from "../config/model-input.js";
 import type { SessionEntry } from "../config/sessions.js";
 import { hasSessionAutoModelFallbackProvenance } from "../config/sessions/model-override-provenance.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { logWarn } from "../globals.js";
 import { formatDurationCompact } from "../infra/format-time/format-duration.ts";
 import {
   formatUsageWindowSummary,
   loadProviderUsageSummary,
   resolveUsageProviderId,
 } from "../infra/provider-usage.js";
+import { logWarn } from "../logger.js";
 import { normalizeAccountId } from "../routing/account-id.js";
 import { resolveNormalizedAccountEntry } from "../routing/account-lookup.js";
 import {
@@ -93,57 +93,38 @@ function resolveStatusChannelFeatureLine(params: {
     : "Telegram rich messages: off · set channels.telegram.richMessages=true for tables/details/rich media";
 }
 
-let statusMessageRuntimePromise: Promise<typeof import("../auto-reply/status.runtime.js")> | null =
-  null;
-let agentHarnessSelectionRuntimePromise: Promise<
-  typeof import("../agents/harness/selection.js")
-> | null = null;
-let statusQueueRuntimePromise: Promise<typeof import("./status-queue.runtime.js")> | null = null;
-let statusSubagentsRuntimePromise: Promise<typeof import("./status-subagents.runtime.js")> | null =
-  null;
-let statusPluginHealthRuntimePromise: Promise<
-  typeof import("./status-plugin-health.runtime.js")
-> | null = null;
-
-function loadStatusMessageRuntime(): Promise<
-  typeof import("../auto-reply/status.runtime.js") | undefined
-> {
-  const runtimePromise = (statusMessageRuntimePromise ??= import("./status-message.runtime.js")
-    .then((module) => module.loadStatusMessageRuntimeModule())
-    .catch(() => undefined));
-  return runtimePromise;
+/**
+ * Lazy-loads a status sub-module with transient-failure retry. A successful
+ * load is cached for the process lifetime; a rejected load is NOT cached, so
+ * a one-off import failure (cold-prewarm EMFILE race, etc.) degrades only a
+ * single /status call and the next one retries the import (#94626).
+ */
+function lazyStatusModule<T>(load: () => Promise<T>): () => Promise<T> {
+  let cached: Promise<T> | null = null;
+  return () => {
+    cached ??= load().catch((err: unknown) => {
+      cached = null;
+      throw err;
+    });
+    return cached;
+  };
 }
 
-function loadAgentHarnessSelectionRuntime(): Promise<
-  typeof import("../agents/harness/selection.js") | undefined
-> {
-  const runtimePromise = (agentHarnessSelectionRuntimePromise ??=
-    import("../agents/harness/selection.js").catch(() => undefined));
-  return runtimePromise;
-}
+const loadStatusMessageRuntime = lazyStatusModule(() =>
+  import("./status-message.runtime.js").then((m) => m.loadStatusMessageRuntimeModule()),
+);
 
-function loadStatusSubagentsRuntime(): Promise<
-  typeof import("./status-subagents.runtime.js") | undefined
-> {
-  const runtimePromise = (statusSubagentsRuntimePromise ??=
-    import("./status-subagents.runtime.js").catch(() => undefined));
-  return runtimePromise;
-}
+const loadAgentHarnessSelectionRuntime = lazyStatusModule(
+  () => import("../agents/harness/selection.js"),
+);
 
-function loadStatusQueueRuntime(): Promise<typeof import("./status-queue.runtime.js") | undefined> {
-  const runtimePromise = (statusQueueRuntimePromise ??= import("./status-queue.runtime.js").catch(
-    () => undefined,
-  ));
-  return runtimePromise;
-}
+const loadStatusSubagentsRuntime = lazyStatusModule(() => import("./status-subagents.runtime.js"));
 
-function loadStatusPluginHealthRuntime(): Promise<
-  typeof import("./status-plugin-health.runtime.js") | undefined
-> {
-  const runtimePromise = (statusPluginHealthRuntimePromise ??=
-    import("./status-plugin-health.runtime.js").catch(() => undefined));
-  return runtimePromise;
-}
+const loadStatusQueueRuntime = lazyStatusModule(() => import("./status-queue.runtime.js"));
+
+const loadStatusPluginHealthRuntime = lazyStatusModule(
+  () => import("./status-plugin-health.runtime.js"),
+);
 
 // Context lookup stays synchronous/non-refreshing so status output does not
 // trigger provider/catalog IO while rendering a command response.
