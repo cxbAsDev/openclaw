@@ -352,7 +352,13 @@ export async function maybeRepairLegacyCronStore(params: {
   if (shellPromptAdvisory) {
     note(shellPromptAdvisory, "Cron");
   }
-  const previewLines = formatLegacyIssuePreview(normalized.issues);
+  // Exclude manual-only advisories (already emitted above) from the
+  // auto-repair preview so they don't get routed through the
+  // "Repair with openclaw doctor --fix" call-to-action (#94655).
+  const autoFixableIssues = { ...normalized.issues };
+  delete autoFixableIssues.unresolvedAgentTurnShellToolPrompt;
+  delete autoFixableIssues.unresolvedAgentTurnCommandPrompt;
+  const previewLines = formatLegacyIssuePreview(autoFixableIssues);
   if (legacyStoreDetected) {
     previewLines.unshift(
       legacyImportCount > 0
