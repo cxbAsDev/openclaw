@@ -14,7 +14,7 @@ import type { MediaUnderstandingDecision } from "../media-understanding/types.js
 export type BuildStatusTextParams = {
   cfg: OpenClawConfig;
   sessionEntry?: SessionEntry;
-  sessionKey: string;
+  sessionKey?: string;
   parentSessionKey?: string;
   sessionScope?: SessionScope;
   storePath?: string;
