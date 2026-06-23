@@ -47,6 +47,7 @@ env:
 
 jobs:
   preview_plugins_npm:
+    if: github.repository == 'openclaw/openclaw'
     runs-on: ubuntu-latest
     permissions:
       contents: read
