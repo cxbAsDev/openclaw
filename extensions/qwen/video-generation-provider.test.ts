@@ -105,23 +105,27 @@ describe("qwen video generation provider", () => {
   });
 
   it("rejects DashScope video downloads that exceed the configured media cap", async () => {
+    const submitJson = JSON.stringify({
+      request_id: "req-too-large",
+      output: { task_id: "task-too-large" },
+    });
     postJsonRequestMock.mockResolvedValue({
       response: {
-        json: async () => ({
-          request_id: "req-too-large",
-          output: { task_id: "task-too-large" },
-        }),
+        json: async () => JSON.parse(submitJson),
+        arrayBuffer: async () => new TextEncoder().encode(submitJson).buffer,
       },
       release: async () => {},
     });
+    const pollJson = JSON.stringify({
+      output: {
+        task_status: "SUCCEEDED",
+        results: [{ video_url: "https://example.com/too-large.mp4" }],
+      },
+    });
     fetchWithTimeoutMock
       .mockResolvedValueOnce({
-        json: async () => ({
-          output: {
-            task_status: "SUCCEEDED",
-            results: [{ video_url: "https://example.com/too-large.mp4" }],
-          },
-        }),
+        json: async () => JSON.parse(pollJson),
+        arrayBuffer: async () => new TextEncoder().encode(pollJson).buffer,
         headers: new Headers(),
       })
       .mockResolvedValueOnce(streamedVideoResponse("too-large"));

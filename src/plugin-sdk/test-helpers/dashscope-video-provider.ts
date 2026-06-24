@@ -49,25 +49,27 @@ export function mockSuccessfulDashscopeVideoTask(
     taskStatus = "SUCCEEDED",
     videoUrl = "https://example.com/out.mp4",
   } = params;
+  const submitJson = JSON.stringify({
+    request_id: requestId,
+    output: { task_id: taskId },
+  });
   mocks.postJsonRequestMock.mockResolvedValue({
     response: {
-      json: async () => ({
-        request_id: requestId,
-        output: {
-          task_id: taskId,
-        },
-      }),
+      json: async () => JSON.parse(submitJson),
+      arrayBuffer: async () => new TextEncoder().encode(submitJson).buffer,
     },
     release: vi.fn(async () => {}),
   });
+  const pollJson = JSON.stringify({
+    output: {
+      task_status: taskStatus,
+      results: [{ video_url: videoUrl }],
+    },
+  });
   mocks.fetchWithTimeoutMock
     .mockResolvedValueOnce({
-      json: async () => ({
-        output: {
-          task_status: taskStatus,
-          results: [{ video_url: videoUrl }],
-        },
-      }),
+      json: async () => JSON.parse(pollJson),
+      arrayBuffer: async () => new TextEncoder().encode(pollJson).buffer,
       headers: new Headers(),
     })
     .mockResolvedValueOnce({
