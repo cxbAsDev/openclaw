@@ -76,6 +76,7 @@ export const DEFAULT_VIDEO_RESOLUTION_TO_SIZE: Record<string, string> = {
 
 const DEFAULT_VIDEO_GENERATION_POLL_INTERVAL_MS = 2_500;
 const DEFAULT_VIDEO_GENERATION_MAX_POLL_ATTEMPTS = 120;
+const DASHSCOPE_VIDEO_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
 
 export type DashscopeVideoGenerationResponse = {
   output?: {
@@ -199,7 +200,15 @@ export async function pollDashscopeVideoTaskUntilComplete(params: {
       provider: params.providerLabel,
       requestFailedMessage: `${params.providerLabel} video-generation task poll failed`,
     });
-    const payload = (await response.json()) as DashscopeVideoGenerationResponse;
+    const pollBytes = await readResponseWithLimit(response, DASHSCOPE_VIDEO_RESPONSE_MAX_BYTES, {
+      onOverflow: ({ maxBytes }) =>
+        new Error(
+          `${params.providerLabel} video-generation poll response exceeds ${maxBytes} bytes`,
+        ),
+    });
+    const payload = JSON.parse(
+      new TextDecoder().decode(pollBytes),
+    ) as DashscopeVideoGenerationResponse;
     const status = payload.output?.task_status?.trim().toUpperCase();
     if (status === "SUCCEEDED") {
       return payload;
@@ -266,7 +275,15 @@ export async function runDashscopeVideoGenerationTask(params: {
 
   try {
     await assertOkOrThrowHttpError(response, `${params.providerLabel} video generation failed`);
-    const submitted = (await response.json()) as DashscopeVideoGenerationResponse;
+    const submitBytes = await readResponseWithLimit(response, DASHSCOPE_VIDEO_RESPONSE_MAX_BYTES, {
+      onOverflow: ({ maxBytes }) =>
+        new Error(
+          `${params.providerLabel} video-generation submit response exceeds ${maxBytes} bytes`,
+        ),
+    });
+    const submitted = JSON.parse(
+      new TextDecoder().decode(submitBytes),
+    ) as DashscopeVideoGenerationResponse;
     const taskId = submitted.output?.task_id?.trim();
     if (!taskId) {
       throw new Error(`${params.providerLabel} video generation response missing task_id`);
