@@ -138,8 +138,21 @@ function mockGeneratedResponse() {
       },
     ],
   };
-  postJsonRequestMock.mockResolvedValue({ response: { json: async () => payload }, release });
-  postMultipartRequestMock.mockResolvedValue({ response: { json: async () => payload }, release });
+  const body = JSON.stringify(payload);
+  postJsonRequestMock.mockResolvedValue({
+    response: {
+      json: async () => payload,
+      arrayBuffer: async () => new TextEncoder().encode(body).buffer,
+    },
+    release,
+  });
+  postMultipartRequestMock.mockResolvedValue({
+    response: {
+      json: async () => payload,
+      arrayBuffer: async () => new TextEncoder().encode(body).buffer,
+    },
+    release,
+  });
   return release;
 }
 
@@ -249,8 +262,12 @@ describe("OpenAI-compatible image provider helper", () => {
   });
 
   it("honors default operation timeouts and empty-response errors", async () => {
+    const emptyBody = JSON.stringify({ data: [] });
     postJsonRequestMock.mockResolvedValue({
-      response: { json: async () => ({ data: [] }) },
+      response: {
+        json: async () => JSON.parse(emptyBody),
+        arrayBuffer: async () => new TextEncoder().encode(emptyBody).buffer,
+      },
       release: vi.fn(async () => {}),
     });
     const provider = createProvider({
@@ -281,8 +298,12 @@ describe("OpenAI-compatible image provider helper", () => {
   });
 
   it("wraps malformed successful image responses with provider-owned errors", async () => {
+    const malformedBody = JSON.stringify({ data: { b64_json: "not-an-array" } });
     postJsonRequestMock.mockResolvedValue({
-      response: { json: async () => ({ data: { b64_json: "not-an-array" } }) },
+      response: {
+        json: async () => JSON.parse(malformedBody),
+        arrayBuffer: async () => new TextEncoder().encode(malformedBody).buffer,
+      },
       release: vi.fn(async () => {}),
     });
     const provider = createProvider();
