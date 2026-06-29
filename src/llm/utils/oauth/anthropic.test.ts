@@ -79,4 +79,38 @@ describe("Anthropic OAuth token responses", () => {
       "Anthropic token refresh returned invalid token fields.",
     );
   });
+
+  it("rejects oversized token refresh responses", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => makeOversizedOAuthJsonResponse()));
+
+    await expect(refreshAnthropicToken("old-refresh-token")).rejects.toThrow(
+      "Anthropic OAuth token response exceeds",
+    );
+  });
 });
+
+/**
+ * Builds a JSON response body larger than the 16 MiB OAuth cap so the bounded
+ * reader cancels the stream mid-flight; proves oversized token responses are
+ * rejected before full buffering.
+ */
+function makeOversizedOAuthJsonResponse(): Response {
+  const ONE_MIB = 1024 * 1024;
+  const TOTAL_CHUNKS = 18;
+  const chunk = new Uint8Array(ONE_MIB);
+  let pulled = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (pulled >= TOTAL_CHUNKS) {
+        controller.close();
+        return;
+      }
+      pulled += 1;
+      controller.enqueue(chunk);
+    },
+  });
+  return new Response(body, {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
