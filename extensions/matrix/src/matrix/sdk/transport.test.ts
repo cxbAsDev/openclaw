@@ -333,6 +333,95 @@ describe("performMatrixRequest", () => {
     expect(result.text).toBe(payload);
     expect(result.buffer.toString("utf8")).toBe(payload);
   });
+
+  it("rejects oversized raw responses via content-length when maxBytes is omitted (default SDK cap)", async () => {
+    // content-length declares body at ~65 MiB — exceeds the 64 MiB default cap
+    const overCap = 64 * 1024 * 1024 + (64 * 1024 + 1);
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({ cancel });
+    stubRuntimeFetch(
+      vi.fn(
+        async () =>
+          new Response(stream, {
+            status: 200,
+            headers: { "content-length": String(overCap) },
+          }),
+      ),
+    );
+
+    await expect(
+      performMatrixRequest({
+        homeserver: "http://127.0.0.1:8008",
+        accessToken: "token",
+        method: "GET",
+        endpoint: "/_matrix/media/v3/download/example/id",
+        timeoutMs: 5000,
+        raw: true,
+        // intentionally omit maxBytes — default SDK cap should reject it
+        ssrfPolicy: { allowPrivateNetwork: true },
+      }),
+    ).rejects.toBeInstanceOf(MatrixMediaSizeLimitError);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("allows small raw buffer bodies under the default SDK cap when maxBytes is omitted", async () => {
+    const payload = new Uint8Array([1, 2, 3, 4, 5]);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(payload);
+        controller.close();
+      },
+    });
+    stubRuntimeFetch(
+      vi.fn(
+        async () =>
+          new Response(stream, {
+            status: 200,
+          }),
+      ),
+    );
+
+    const result = await performMatrixRequest({
+      homeserver: "http://127.0.0.1:8008",
+      accessToken: "token",
+      method: "GET",
+      endpoint: "/_matrix/media/v3/download/example/id",
+      timeoutMs: 5000,
+      raw: true,
+      // intentionally omit maxBytes — small body passes through default cap
+      ssrfPolicy: { allowPrivateNetwork: true },
+    });
+
+    expect(result.buffer).toEqual(Buffer.from(payload));
+  });
+
+  it("respects explicit maxBytes over the default cap for raw responses", async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({ cancel });
+    stubRuntimeFetch(
+      vi.fn(
+        async () =>
+          new Response(stream, {
+            status: 200,
+            headers: { "content-length": "512" },
+          }),
+      ),
+    );
+
+    await expect(
+      performMatrixRequest({
+        homeserver: "http://127.0.0.1:8008",
+        accessToken: "token",
+        method: "GET",
+        endpoint: "/_matrix/media/v3/download/example/id",
+        timeoutMs: 5000,
+        raw: true,
+        maxBytes: 256,
+        ssrfPolicy: { allowPrivateNetwork: true },
+      }),
+    ).rejects.toBeInstanceOf(MatrixMediaSizeLimitError);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
 });
 
 describe("createMatrixGuardedFetch", () => {

@@ -165,8 +165,10 @@ export function createMatrixCryptoFacade(deps: {
       file: EncryptedFile,
       opts?: { maxBytes?: number; readIdleTimeoutMs?: number },
     ): Promise<Buffer> => {
-      const { Attachment, EncryptedAttachment } = await loadMatrixCryptoNodeBindings();
+      // Download before loading native crypto bindings so oversized media
+      // fails at the transport size guard without paying the binding-load cost.
       const encrypted = await deps.downloadContent(file.url, opts);
+      const { Attachment, EncryptedAttachment } = await loadMatrixCryptoNodeBindings();
       const metadata: EncryptedFile = {
         url: file.url,
         key: file.key,

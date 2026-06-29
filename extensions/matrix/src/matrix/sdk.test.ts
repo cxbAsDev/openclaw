@@ -689,6 +689,53 @@ describe("MatrixClient request hardening", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it("forwards encrypted media download limits through the crypto facade to transport", async () => {
+    // Verify that opts (maxBytes, readIdleTimeoutMs) reach transport via the
+    // crypto facade → downloadContent → requestRaw → performMatrixRequest
+    // chain, so the transport size guard rejects oversized encrypted media.
+    const payload = Buffer.from([9, 10, 11, 12, 13]);
+    const fetchMock = vi.fn(async () => new Response(payload, { status: 200 }));
+    stubRuntimeFetch(fetchMock as unknown as typeof fetch);
+
+    const client = new MatrixClient("http://127.0.0.1:8008", "token", {
+      encryption: true,
+      ssrfPolicy: { allowPrivateNetwork: true },
+    });
+    await (
+      client as unknown as {
+        ensureCryptoSupportInitialized: () => Promise<void>;
+      }
+    ).ensureCryptoSupportInitialized();
+
+    const cryptoFacade = client.crypto;
+    if (!cryptoFacade) {
+      throw new Error("expected Matrix crypto facade");
+    }
+    await expect(
+      cryptoFacade.decryptMedia(
+        {
+          url: "mxc://example.org/encrypted",
+          key: {
+            alg: "A256CTR",
+            ext: true,
+            k: "unused",
+            key_ops: ["encrypt", "decrypt"],
+            kty: "oct",
+          },
+          iv: "unused",
+          hashes: { sha256: "unused" },
+          v: "v2",
+        },
+        {
+          maxBytes: 4,
+          readIdleTimeoutMs: 25,
+        },
+      ),
+    ).rejects.toThrow(/Matrix media exceeds configured size limit/);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("MatrixClient event bridge", () => {
