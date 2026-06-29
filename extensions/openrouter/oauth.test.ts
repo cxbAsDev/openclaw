@@ -312,4 +312,26 @@ describe("OpenRouter OAuth", () => {
   it("exposes stable auth choice metadata", () => {
     expect(OPENROUTER_OAUTH_CHOICE_ID).toBe("openrouter-oauth");
   });
+
+  it("rejects oversized API key responses through the default fetch path", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => makeOversizedOAuthResponse()));
+
+    await expect(
+      exchangeOpenRouterOAuthCode({ code: "AUTHCODE", codeVerifier: "verifier" }),
+    ).rejects.toThrow("OpenRouter OAuth key response exceeds");
+  });
 });
+
+function makeOversizedOAuthResponse(): Response {
+  const ONE_MIB = 1024 * 1024;
+  const chunk = new Uint8Array(ONE_MIB);
+  let pulled = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (pulled >= 18) { controller.close(); return; }
+      controller.enqueue(chunk); pulled += 1;
+    },
+  });
+  return new Response(body, { status: 200,
+    headers: { "Content-Type": "application/json" } });
+}
