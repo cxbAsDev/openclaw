@@ -82,8 +82,11 @@ function resolveLimit(req: IncomingMessage): number | undefined {
 }
 
 function sseWrite(res: ServerResponse, event: string, payload: unknown): void {
+  // Serialize before any res.write so a non-serializable root throws
+  // without emitting a partial SSE frame (event line with no data).
+  const data = guardJsonStringify("sseWrite", payload);
   res.write(`event: ${event}\n`);
-  res.write(`data: ${guardJsonStringify("sseWrite", payload)}\n\n`);
+  res.write(`data: ${data}\n\n`);
 }
 
 /** Handle `/sessions/:sessionKey/history` JSON/SSE requests. */

@@ -434,4 +434,29 @@ describe("guardJsonStringify", () => {
   it("includes the value type in the error message", () => {
     expect(() => guardJsonStringify("test", undefined)).toThrow("undefined");
   });
+
+  it("serializes before any writes — no partial output on failure", () => {
+    // Regression: guard must throw before the caller can issue any
+    // res.write.  Simulate the writeSse/sseWrite order: serialize first,
+    // then write.  A non-serializable root must never reach the write.
+    const writes: string[] = [];
+    const write = (s: string) => writes.push(s);
+
+    const sseWrite = (event: string, payload: unknown) => {
+      const data = guardJsonStringify("sseWrite", payload);
+      write(`event: ${event}\n`);
+      write(`data: ${data}\n\n`);
+    };
+
+    // Non-serializable: throw before any write
+    expect(() => sseWrite("history", undefined)).toThrow(TypeError);
+    expect(writes).toHaveLength(0);
+
+    // Serializable: both lines written
+    sseWrite("history", { ok: true });
+    expect(writes).toEqual([
+      "event: history\n",
+      'data: {"ok":true}\n\n',
+    ]);
+  });
 });
