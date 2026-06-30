@@ -1,4 +1,5 @@
 // Msteams plugin module implements graph behavior.
+import { readProviderJsonResponse } from "openclaw/plugin-sdk/provider-http";
 import { fetchWithSsrFGuard, type SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -143,7 +144,10 @@ async function fetchGraphCollection(params: {
       return { status, items: [] };
     }
     try {
-      const data = (await response.json()) as { value?: unknown[] };
+      const data = await readProviderJsonResponse<{ value?: unknown[] }>(
+        response,
+        "msteams.graph.collection",
+      );
       return { status, items: Array.isArray(data.value) ? data.value : [] };
     } catch {
       return { status, items: [] };
@@ -345,7 +349,10 @@ export async function downloadMSTeamsGraphMedia(params: {
           attachments?: GraphAttachment[];
         };
         try {
-          msgData = (await msgRes.json()) as typeof msgData;
+          msgData = await readProviderJsonResponse<typeof msgData>(
+            msgRes,
+            "msteams.graph.message",
+          );
         } catch (err) {
           debugLog?.debug?.("graph media message parse failed", {
             messageUrl,

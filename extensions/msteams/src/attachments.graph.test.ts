@@ -412,4 +412,111 @@ describe("msteams graph attachments", () => {
       bufferFromSpy.mockRestore();
     }
   });
+
+  it("bounds Graph main message JSON read and cancels the stream on overflow", async () => {
+    const ONE_MIB = 1024 * 1024;
+    let canceled = false;
+
+    const makeOversizedBody = (): ReadableStream<Uint8Array> => {
+      let pulled = 0;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (pulled >= 32) {
+            controller.close();
+            return;
+          }
+          pulled += 1;
+          controller.enqueue(new Uint8Array(ONE_MIB));
+        },
+        cancel() {
+          canceled = true;
+        },
+      });
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = resolveRequestUrl(input);
+      if (url === DEFAULT_MESSAGE_URL) {
+        return new Response(makeOversizedBody(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/hostedContents") || url.endsWith("/attachments")) {
+        return createGraphCollectionResponse([]);
+      }
+      return createNotFoundResponse();
+    });
+
+    const warn = vi.fn();
+    const media = await downloadMSTeamsGraphMedia({
+      messageUrl: DEFAULT_MESSAGE_URL,
+      tokenProvider: createTokenProvider(),
+      maxBytes: DEFAULT_MAX_BYTES,
+      fetchFn: asFetchFn(fetchMock),
+      resolveFn: resolvePublicHost,
+      logger: { warn },
+    });
+
+    expect(canceled).toBe(true);
+    expect(media.media).toStrictEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      "msteams graph message parse failed",
+      expect.objectContaining({
+        error: expect.stringContaining("exceeds") as unknown,
+        messageUrl: DEFAULT_MESSAGE_URL,
+      }),
+    );
+  });
+
+  it("bounds Graph hostedContents collection JSON read and handles overflow gracefully", async () => {
+    const ONE_MIB = 1024 * 1024;
+    let canceled = false;
+
+    const makeOversizedBody = (): ReadableStream<Uint8Array> => {
+      let pulled = 0;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (pulled >= 32) {
+            controller.close();
+            return;
+          }
+          pulled += 1;
+          controller.enqueue(new Uint8Array(ONE_MIB));
+        },
+        cancel() {
+          canceled = true;
+        },
+      });
+    };
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = resolveRequestUrl(input);
+      if (url === DEFAULT_MESSAGE_URL) {
+        return createJsonResponse({ attachments: [] });
+      }
+      if (url.endsWith("/hostedContents")) {
+        return new Response(makeOversizedBody(), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/attachments")) {
+        return createGraphCollectionResponse([]);
+      }
+      return createNotFoundResponse();
+    });
+
+    const media = await downloadMSTeamsGraphMedia({
+      messageUrl: DEFAULT_MESSAGE_URL,
+      tokenProvider: createTokenProvider(),
+      maxBytes: DEFAULT_MAX_BYTES,
+      fetchFn: asFetchFn(fetchMock),
+      resolveFn: resolvePublicHost,
+    });
+
+    expect(canceled).toBe(true);
+    expect(media.hostedCount).toBe(0);
+    expect(media.media).toStrictEqual([]);
+  });
 });

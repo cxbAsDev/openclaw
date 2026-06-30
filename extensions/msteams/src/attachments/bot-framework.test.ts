@@ -514,6 +514,57 @@ describe("downloadMSTeamsBotFrameworkAttachment", () => {
         { status: 500 },
       ]);
     });
+
+    it("bounds attachmentInfo JSON read and cancels the stream on overflow", async () => {
+      const ONE_MIB = 1024 * 1024;
+      let canceled = false;
+
+      const makeOversizedBody = (): ReadableStream<Uint8Array> => {
+        let pulled = 0;
+        return new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (pulled >= 32) {
+              controller.close();
+              return;
+            }
+            pulled += 1;
+            controller.enqueue(new Uint8Array(ONE_MIB));
+          },
+          cancel() {
+            canceled = true;
+          },
+        });
+      };
+
+      const warn = vi.fn();
+      const logger = { warn };
+      const fetchFn = createMockFetch([
+        {
+          match: /\/v3\/attachments\/att-oversized$/,
+          response: new Response(makeOversizedBody(), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        },
+      ]);
+
+      const media = await downloadMSTeamsBotFrameworkAttachment({
+        serviceUrl: "https://smba.trafficmanager.net/amer",
+        attachmentId: "att-oversized",
+        tokenProvider: buildTokenProvider(),
+        maxBytes: 10_000_000,
+        fetchFn,
+        resolveFn: resolvePublicHost,
+        logger,
+      });
+
+      expect(canceled).toBe(true);
+      expect(media).toBeUndefined();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(firstMockCall(warn, "logger.warn")[0]).toBe(
+        "msteams botFramework attachmentInfo parse failed",
+      );
+    });
   });
 });
 
