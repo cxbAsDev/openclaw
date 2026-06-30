@@ -247,6 +247,37 @@ describe("resolveGraphChatId", () => {
 
     expect(result).toBeNull();
   });
+
+  it("rejects oversized OneDrive upload responses and cancels the stream", async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({
+      cancel,
+      start(controller) {
+        const ONE_MIB = 1024 * 1024;
+        for (let i = 0; i < 18; i++) {
+          controller.enqueue(new Uint8Array(ONE_MIB));
+        }
+        controller.close();
+      },
+    });
+    const fetchFn = vi.fn(
+      async () =>
+        new Response(stream, {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+
+    await expect(
+      uploadToOneDrive({
+        buffer: Buffer.from("x"),
+        filename: "a.txt",
+        tokenProvider,
+        fetchFn,
+      }),
+    ).rejects.toThrow("msteams.graph.oneDriveUpload: JSON response exceeds");
+    expect(cancel).toHaveBeenCalledOnce();
+  });
 });
 
 describe("buildTeamsFileInfoCard", () => {
@@ -285,4 +316,5 @@ describe("buildTeamsFileInfoCard", () => {
       },
     });
   });
+
 });
