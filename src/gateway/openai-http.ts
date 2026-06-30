@@ -48,6 +48,7 @@ import {
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import {
+  guardJsonStringify,
   sendJson,
   sendMissingScopeForbidden,
   setSseHeaders,
@@ -154,16 +155,7 @@ function resolveOpenAiChatCompletionsLimits(
 }
 
 function writeSse(res: ServerResponse, data: unknown) {
-  const serialized = JSON.stringify(data);
-  // JSON.stringify returns undefined when the root value is undefined, a
-  // function, or a symbol — guard to avoid writing the literal string
-  // "undefined" as SSE data, which would produce garbled client output.
-  if (serialized === undefined) {
-    throw new TypeError(
-      `writeSse: data of type ${typeof data} is not JSON-serializable (JSON.stringify returned undefined)`,
-    );
-  }
-  res.write(`data: ${serialized}\n\n`);
+  res.write(`data: ${guardJsonStringify("writeSse", data)}\n\n`);
 }
 
 function buildAgentCommandInput(params: {

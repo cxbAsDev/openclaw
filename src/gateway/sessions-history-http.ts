@@ -13,6 +13,7 @@ import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import { DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS } from "./chat-display-projection.js";
 import {
+  guardJsonStringify,
   sendInvalidRequest,
   sendJson,
   sendMethodNotAllowed,
@@ -81,17 +82,8 @@ function resolveLimit(req: IncomingMessage): number | undefined {
 }
 
 function sseWrite(res: ServerResponse, event: string, payload: unknown): void {
-  const serialized = JSON.stringify(payload);
-  // JSON.stringify returns undefined when the root value is undefined, a
-  // function, or a symbol — guard to avoid writing the literal string
-  // "undefined" as SSE data, which would produce garbled client output.
-  if (serialized === undefined) {
-    throw new TypeError(
-      `sseWrite: payload of type ${typeof payload} is not JSON-serializable (JSON.stringify returned undefined)`,
-    );
-  }
   res.write(`event: ${event}\n`);
-  res.write(`data: ${serialized}\n\n`);
+  res.write(`data: ${guardJsonStringify("sseWrite", payload)}\n\n`);
 }
 
 /** Handle `/sessions/:sessionKey/history` JSON/SSE requests. */

@@ -122,6 +122,24 @@ export async function readJsonBodyOrError(
   return body.value;
 }
 
+/**
+ * Serialize a value for SSE/JSON output, throwing on non-serializable roots.
+ *
+ * JSON.stringify returns undefined when the root value is undefined, a
+ * function, or a symbol (ECMA-262 §24.5.2).  Without this guard a template
+ * literal coerces the undefined to the literal string "undefined", which
+ * produces garbled SSE/JSON output.
+ */
+export function guardJsonStringify(caller: string, value: unknown): string {
+  const serialized = JSON.stringify(value);
+  if (serialized === undefined) {
+    throw new TypeError(
+      `${caller}: value of type ${typeof value} is not JSON-serializable (JSON.stringify returned undefined)`,
+    );
+  }
+  return serialized;
+}
+
 export function writeDone(res: ServerResponse) {
   res.write("data: [DONE]\n\n");
 }

@@ -10,6 +10,7 @@ import {
 } from "../infra/diagnostic-events.js";
 import type { GatewayAuthResult } from "./auth.js";
 import {
+  guardJsonStringify,
   readJsonBodyOrError,
   sendGatewayAuthFailure,
   sendInvalidRequest,
@@ -390,5 +391,47 @@ describe("watchClientDisconnect", () => {
     expect(socket.listenerCount("close")).toBe(1);
     cleanup();
     expect(socket.listenerCount("close")).toBe(0);
+  });
+});
+
+describe("guardJsonStringify", () => {
+  it("serializes a plain object to JSON", () => {
+    expect(guardJsonStringify("test", { ok: true })).toBe('{"ok":true}');
+  });
+
+  it("serializes a string", () => {
+    expect(guardJsonStringify("test", "hello")).toBe('"hello"');
+  });
+
+  it("serializes a number", () => {
+    expect(guardJsonStringify("test", 42)).toBe("42");
+  });
+
+  it("serializes null as the JSON literal null", () => {
+    expect(guardJsonStringify("test", null)).toBe("null");
+  });
+
+  it("serializes an array", () => {
+    expect(guardJsonStringify("test", [1, 2, 3])).toBe("[1,2,3]");
+  });
+
+  it("throws TypeError for an undefined root value", () => {
+    expect(() => guardJsonStringify("test", undefined)).toThrow(TypeError);
+  });
+
+  it("throws TypeError for a function root value", () => {
+    expect(() => guardJsonStringify("test", () => 42)).toThrow(TypeError);
+  });
+
+  it("throws TypeError for a symbol root value", () => {
+    expect(() => guardJsonStringify("test", Symbol("x"))).toThrow(TypeError);
+  });
+
+  it("includes the caller name in the error message", () => {
+    expect(() => guardJsonStringify("writeSse", undefined)).toThrow("writeSse");
+  });
+
+  it("includes the value type in the error message", () => {
+    expect(() => guardJsonStringify("test", undefined)).toThrow("undefined");
   });
 });
