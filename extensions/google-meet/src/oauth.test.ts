@@ -234,7 +234,9 @@ describe("Google Meet OAuth", () => {
       cancel,
       start(controller) {
         const ONE_MIB = 1024 * 1024;
-        for (let i = 0; i < 18; i++) controller.enqueue(new Uint8Array(ONE_MIB));
+        for (let i = 0; i < 18; i++) {
+          controller.enqueue(new Uint8Array(ONE_MIB));
+        }
         controller.close();
       },
     });
