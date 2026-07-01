@@ -154,6 +154,12 @@ describe("describeImageWithModel", () => {
         base_resp: { status_code: 0 },
         content: "portal ok",
       })),
+      arrayBuffer: vi.fn(
+        async () =>
+          new TextEncoder().encode(
+            JSON.stringify({ base_resp: { status_code: 0 }, content: "portal ok" }),
+          ).buffer,
+      ),
       text: vi.fn(async () => ""),
     });
     discoverModelsMock.mockReturnValue({
