@@ -17,6 +17,11 @@ describe("parseFfprobeVideoDimensions", () => {
     ).toEqual({ width: 720, height: 1280 });
   });
 
+  it("returns undefined for malformed JSON instead of throwing", () => {
+    expect(parseFfprobeVideoDimensions("{")).toBeUndefined();
+    expect(parseFfprobeVideoDimensions("")).toBeUndefined();
+  });
+
   it("ignores missing or invalid dimensions", () => {
     expect(parseFfprobeVideoDimensions(JSON.stringify({ streams: [] }))).toBeUndefined();
     expect(
