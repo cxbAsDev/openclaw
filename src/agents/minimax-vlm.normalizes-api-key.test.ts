@@ -213,7 +213,9 @@ describe("minimaxUnderstandImage apiKey normalization", () => {
     const ONE_MIB = 1024 * 1024;
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
-        for (let i = 0; i < 18; i++) controller.enqueue(new Uint8Array(ONE_MIB));
+        for (let i = 0; i < 18; i++) {
+          controller.enqueue(new Uint8Array(ONE_MIB));
+        }
         controller.close();
       },
       cancel() {
